@@ -3,10 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 // Cloudflare Pages 需要 Edge Runtime
 export const runtime = 'edge';
 
-const API_KEY = process.env.GRSAI_API_KEY || "";
-const BASE_URL = process.env.GRSAI_BASE_URL || "https://grsai.dakka.com.cn";
+// ArrayBuffer 转 Base64 (Edge Runtime 兼容)
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
-// 创建超时时间较长的 AbortController (10分钟)
+// 创建超时控制器
 function createTimeoutController(ms: number) {
   const controller = new AbortController();
   setTimeout(() => controller.abort(), ms);
@@ -44,18 +51,21 @@ export async function POST(request: NextRequest) {
       shutProgress: false,
     };
 
-    // 处理参考图片
+    // 处理参考图片 (Edge Runtime 兼容)
     if (referenceImage) {
       const bytes = await referenceImage.arrayBuffer();
-      const buffer = Buffer.from(bytes);
-      const base64 = `data:${referenceImage.type};base64,${buffer.toString("base64")}`;
-      body.urls = [base64];
+      const base64 = arrayBufferToBase64(bytes);
+      body.urls = [`data:${referenceImage.type};base64,${base64}`];
     } else if (referenceImageUrl) {
       body.urls = [referenceImageUrl];
     }
 
-    // 调用grsai API (设置10分钟超时)
-    const controller = createTimeoutController(10 * 60 * 1000); // 10分钟
+    // 获取环境变量
+    const API_KEY = (request.headers.get("x-api-key") || process.env.GRSAI_API_KEY || "");
+    const BASE_URL = process.env.GRSAI_BASE_URL || "https://grsai.dakka.com.cn";
+
+    // 调用 grsai API (设置10分钟超时)
+    const controller = createTimeoutController(10 * 60 * 1000);
     const response = await fetch(`${BASE_URL}/v1/draw/nano-banana`, {
       method: "POST",
       headers: {
@@ -67,7 +77,6 @@ export async function POST(request: NextRequest) {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
       return NextResponse.json(
         { message: `API请求失败: ${response.status}` },
         { status: response.status }
@@ -77,7 +86,6 @@ export async function POST(request: NextRequest) {
     // 处理流式响应
     const reader = response.body?.getReader();
     if (!reader) {
-      console.error("无法获取响应流");
       return NextResponse.json(
         { message: "无法获取响应流" },
         { status: 500 }
@@ -91,14 +99,12 @@ export async function POST(request: NextRequest) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
-        // 处理缓冲区中剩余的数据
         if (buffer.trim()) {
           try {
             const data = JSON.parse(buffer);
-            console.log("最终数据:", JSON.stringify(data, null, 2));
             finalResult = data;
           } catch (e) {
-            console.error("解析最终数据失败:", buffer);
+            // 解析失败，忽略
           }
         }
         break;
@@ -106,28 +112,23 @@ export async function POST(request: NextRequest) {
 
       buffer += decoder.decode(value, { stream: true });
 
-      // 尝试解析缓冲区中的数据
-      // SSE格式可能以 "data: " 开头
       const lines = buffer.split("\n");
-      buffer = lines.pop() || ""; // 保留最后一行可能不完整的数据
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
         const trimmedLine = line.trim();
         if (!trimmedLine) continue;
 
-        // 移除SSE的 "data: " 前缀
         const jsonLine = trimmedLine.replace(/^data:\s*/i, "");
 
         try {
           const data = JSON.parse(jsonLine);
-          console.log("解析到数据:", JSON.stringify(data, null, 2));
-
           if (data.status === "succeeded" || data.status === "failed") {
             finalResult = data;
             break;
           }
         } catch (e) {
-          console.log("解析失败，跳过:", jsonLine.substring(0, 100));
+          // 解析失败，跳过
         }
       }
 
@@ -135,7 +136,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (!finalResult) {
-      console.error("未能获取最终结果");
       return NextResponse.json(
         { message: "未能获取生成结果" },
         { status: 500 }
@@ -144,8 +144,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(finalResult);
   } catch (error) {
-    console.error("生成图片失败:", error);
-
     // 检查是否是超时错误
     if (error instanceof Error && error.name === "AbortError") {
       return NextResponse.json(
