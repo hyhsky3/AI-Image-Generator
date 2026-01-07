@@ -142,6 +142,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Handle upstream error format { code: -1, msg: "..." }
+    if (finalResult.code === -1 && finalResult.msg) {
+      return NextResponse.json(
+        { message: `服务商错误: ${finalResult.msg}` },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json(finalResult);
   } catch (error) {
     // 检查是否是超时错误
