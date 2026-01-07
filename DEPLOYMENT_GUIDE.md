@@ -26,7 +26,16 @@ git push
      - *注意：如果在预设中无法修改命令，可以在设置完成后去 Settings -> Builds & deployments 中修改。*
    - **Build output directory**: `.vercel/output/static` (这是 @cloudflare/next-on-pages 的默认输出目录)
 
-## 3. 环境变量配置
+## 3. 关键设置：兼容性标志 (Compatibility Flags)
+
+**这是最容易被忽略的一步，必须设置！**
+
+1.  进入项目页面的 **Settings** > **Functions**。
+2.  找到 **Compatibility Flags** 部分。
+3.  添加一个标志：`nodejs_compat`。
+4.  保存设置。
+
+## 4. 环境变量配置
 
 在部署前（或部署失败后），你需要设置必要的环境变量。在项目设置的 **Settings** > **Environment variables** 中添加：
 
