@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Cloudflare Pages 需要 Edge Runtime
+export const runtime = 'edge';
+
 const API_KEY = process.env.GRSAI_API_KEY || "";
 const BASE_URL = process.env.GRSAI_BASE_URL || "https://grsai.dakka.com.cn";
 
